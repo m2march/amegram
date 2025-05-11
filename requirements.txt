@@ -1,0 +1,5 @@
+numpy==2.2.4
+sounddevice
+python-telegram-bot
+spidev
+keybow
