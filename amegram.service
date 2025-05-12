@@ -1,0 +1,8 @@
+[Unit]
+After=network.target
+
+[Service]
+ExecStart=/home/march/run_amegram.sh
+
+[Install]
+WantedBy=default.target
