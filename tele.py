@@ -29,6 +29,9 @@ REC_COLOR = [227, 100, 136] # Red
 PLAY_COLOR = [174, 244, 164] # Green
 MID_COLOR = [121, 184, 209] # Blue
 
+CONVERTION_ALPHA = 0.3
+OFF_ALPHA = 0.3
+
 colors = {
     REC_KEY : REC_COLOR,
     MID_KEY : MID_COLOR,
@@ -36,7 +39,7 @@ colors = {
 }
 
 sd.default.device = [0, 1]
-recording_rate = 44000
+recording_rate = 44100
 max_recording_time = 10 * 60
 target_user = 76053031 #"@M2March"
 amp_correction = 1#9
@@ -97,47 +100,50 @@ def blinking_light(cond_f, key, color_arr, freq=2, sleep_time=0.1):
         passed_time = time.time() - start_time
 
 
-async def incoming_light():
-    while True:
-        await new_incoming_message.wait()
-        blinking_light(lambda t : new_incoming_message.is_set(),
-                       PLAY_KEY, colors[PLAY_KEY], freq=0.25)
-        keybow.set_led(PLAY_KEY+3, *[0,0,0])
-        keybow.show()
+async def incoming_light(context):
+    await new_incoming_message.wait()
+    blinking_light(lambda t : new_incoming_message.is_set(),
+                   PLAY_KEY, colors[PLAY_KEY], freq=0.25)
+    keybow.set_led(PLAY_KEY+3, *adjust_color_alpha(colors[PLAY_KEY], OFF_ALPHA))
+    keybow.show()
+    context.job_queue.run_once(incoming_light, 0.1)
 
 
-async def record_voice_note():
-    while True:
-        await recording_message.wait()
-        start_time = time.time()
-        r = sd.rec(max_recording_time * recording_rate, 
-                   samplerate=recording_rate,
-                   channels=1, blocking=False)
-        logging.info('Recording started')
-        cond_f = (lambda t : (recording_message.is_set() and 
-                              (t < max_recording_time)))
-        blinking_light(cond_f, REC_KEY, colors[REC_KEY])
-        message_duration = time.time() - start_time
-        logging.info('Recording ended')
-        keybow.set_led(REC_KEY+3, *colors[REC_KEY])
-        keybow.show()
-        wavfile.write('rec.wav', recording_rate, 
-                      r[:int(message_duration * recording_rate)])
-        a = pydub.AudioSegment.from_file('rec.wav')
-        a.export('rec.ogg', format='ogg')
-        recording_message.clear()
-        new_outgoing_message.set()
-        logging.info('Recording done')
-        await asyncio.sleep(0.0)
+async def record_voice_note(context):
+    await recording_message.wait()
+    start_time = time.time()
+    r = sd.rec(max_recording_time * recording_rate, 
+               samplerate=recording_rate,
+               channels=1, blocking=False)
+    logging.info('Recording started')
+    cond_f = (lambda t : (recording_message.is_set() and 
+                          (t < max_recording_time)))
+    blinking_light(cond_f, REC_KEY, colors[REC_KEY])
+    message_duration = time.time() - start_time
+    logging.info('Recording ended')
+    keybow.set_led(REC_KEY+3, *adjust_color_alpha(colors[REC_KEY],
+                                                  CONVERTION_ALPHA))
+    keybow.show()
+    wavfile.write('rec.wav', recording_rate, 
+                  r[:int(message_duration * recording_rate)])
+    a = pydub.AudioSegment.from_file('rec.wav')
+    a.export('rec.ogg', format='ogg')
+    recording_message.clear()
+    new_outgoing_message.set()
+    logging.info('Recording done')
+    keybow.set_led(REC_KEY+3, *adjust_color_alpha(colors[REC_KEY], 1))
+    keybow.show()
+    context.job_queue.run_once(record_voice_note, 0.1)
 
 
-async def send_voice_note(bot):
-    while True:
-        await new_outgoing_message.wait()
-        logging.info(f'Sending voice message to: {target_user}')
-        await bot.send_voice(target_user, Path('rec.ogg'))
-        logging.info(f'Done sending voice message')
-        new_outgoing_message.clear()
+
+async def send_voice_note(context):
+    await new_outgoing_message.wait()
+    logging.info(f'Sending voice message to: {target_user}')
+    await context.bot.send_voice(target_user, Path('rec.ogg'))
+    logging.info(f'Done sending voice message')
+    new_outgoing_message.clear()
+    context.job_queue.run_once(send_voice_note, 0.1)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -174,11 +180,12 @@ async def voice_echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info(f'Voice from:{update.message.from_user} :: {update.message.audio.duration}s')
 
 
-async def main():
+def main():
     conf = configparser.ConfigParser()
     conf.read('tele.conf')
 
     keybow.set_led(REC_KEY+3, *colors[REC_KEY])
+    keybow.set_led(PLAY_KEY+3, *adjust_color_alpha(colors[PLAY_KEY], OFF_ALPHA))
     keybow.show()
     inc_volume()
 
@@ -191,21 +198,11 @@ async def main():
     application.add_handler(start_handler)
     application.add_handler(echo_handler)
 
-    async with application:
-        await application.start()
-        await application.updater.start_polling(telegram_polling_interval)
+    application.job_queue.run_once(send_voice_note, 0.1)
+    application.job_queue.run_once(incoming_light, 0.1)
+    application.job_queue.run_once(record_voice_note, 0.1)
 
-        send_task = asyncio.create_task(send_voice_note(application.bot))
-        incoming_light_task = asyncio.create_task(incoming_light())
-        recording_task = asyncio.create_task(record_voice_note())
-
-        await send_task
-        await incoming_light_task
-        await recording_task
-
-        await application.updater.stop()
-        await application.stop()
-        await application.shutdown()
+    application.run_polling()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
