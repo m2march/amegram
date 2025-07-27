@@ -51,12 +51,15 @@ recording_message = asyncio.Event()
 @keybow.on()
 def handle_key(index, state):
     if state:
+        loop = asyncio.get_event_loop()
         if index == PLAY_KEY:
             logging.info('Playing sound')
             sr, d = wavfile.read('voice.wav')
             sd.play(d, samplerate=sr, blocking=False)
-            blinking_light(lambda t: t < d.shape[0] / sr,
-                           PLAY_KEY, colors[PLAY_KEY], 2)
+            loop.create_task(
+                blinking_light(lambda t: t < d.shape[0] / sr,
+                            PLAY_KEY, colors[PLAY_KEY], 2)
+            )
             logging.info('Playback done')
             new_incoming_message.clear()
         elif index == REC_KEY:
@@ -66,7 +69,6 @@ def handle_key(index, state):
             else:
                 logging.info('Recording sound')
                 recording_message.set()
-                time.sleep(0.0)
         elif index == MID_KEY:
             inc_volume()
 
@@ -85,7 +87,7 @@ def inc_volume():
                    *adjust_color_alpha(colors[MID_KEY], alpha))
     keybow.show()
 
-def blinking_light(cond_f, key, color_arr, freq=2, sleep_time=0.1):
+async def blinking_light(cond_f, key, color_arr, freq=2, sleep_time=0.1):
     start_time = time.time()
     passed_time = time.time() - start_time
     while (cond_f(passed_time)):
@@ -93,15 +95,15 @@ def blinking_light(cond_f, key, color_arr, freq=2, sleep_time=0.1):
         key_color = adjust_color_alpha(color_arr, key_alpha)
         keybow.set_led(key+3, *key_color)
         keybow.show()
-        time.sleep(sleep_time)
+        await asyncio.sleep(sleep_time)
         passed_time = time.time() - start_time
 
 
 async def incoming_light():
     while True:
         await new_incoming_message.wait()
-        blinking_light(lambda t : new_incoming_message.is_set(),
-                       PLAY_KEY, colors[PLAY_KEY], freq=0.25)
+        await blinking_light(lambda t : new_incoming_message.is_set(),
+                             PLAY_KEY, colors[PLAY_KEY], freq=0.25)
         keybow.set_led(PLAY_KEY+3, *[0,0,0])
         keybow.show()
 
@@ -116,7 +118,7 @@ async def record_voice_note():
         logging.info('Recording started')
         cond_f = (lambda t : (recording_message.is_set() and 
                               (t < max_recording_time)))
-        blinking_light(cond_f, REC_KEY, colors[REC_KEY])
+        await blinking_light(cond_f, REC_KEY, colors[REC_KEY])
         message_duration = time.time() - start_time
         logging.info('Recording ended')
         keybow.set_led(REC_KEY+3, *colors[REC_KEY])
@@ -163,7 +165,7 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keybow.set_led(MID_KEY+3, *colors[MID_KEY])
         keybow.show()
         await context.bot.send_message(chat_id=update.effective_chat.id, text=update.message.text)
-        time.sleep(10)
+        await asyncio.sleep(10)
         keybow.clear()
         keybow.show()
 
