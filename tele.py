@@ -99,58 +99,59 @@ async def blinking_light(cond_f, key, color_arr, freq=2, sleep_time=0.1):
 
 
 async def message_playback(context):
-    logging.info('Started job: "message_playback"')
-    await start_message_playback.wait()
-    new_incoming_message.clear()
-    logging.info('Playing sound')
-    sr, d = wavfile.read('voice.wav')
-    sd.play(d, samplerate=sr, blocking=False)
-    await blinking_light(lambda t: t < d.shape[0] / sr,
-                         PLAY_KEY, colors[PLAY_KEY], 2)
-    logging.info('Playback done')
-    start_message_playback.clear()
-    context.job_queue.run_once(message_playback, 0.1)
+    while True:
+        logging.info('Started job: "message_playback"')
+        await start_message_playback.wait()
+        new_incoming_message.clear()
+        logging.info('Playing sound')
+        sr, d = wavfile.read('voice.wav')
+        sd.play(d, samplerate=sr, blocking=False)
+        await blinking_light(lambda t: t < d.shape[0] / sr,
+                             PLAY_KEY, colors[PLAY_KEY], 2)
+        logging.info('Playback done')
+        start_message_playback.clear()
+        #context.job_queue.run_once(message_playback, 0.1)
 
 
 async def record_voice_note(context):
-    logging.info('Started job: "record_voice_note"')
-    await recording_message.wait()
-    logging.info('Recording pre-started')
-    start_time = time.time()
-    r = sd.rec(max_recording_time * recording_rate, 
-               samplerate=recording_rate,
-               channels=1, blocking=False)
-    logging.info('Recording started')
-    cond_f = (lambda t : (recording_message.is_set() and 
-                          (t < max_recording_time)))
-    await blinking_light(cond_f, REC_KEY, colors[REC_KEY])
-    message_duration = time.time() - start_time
-    logging.info('Recording ended')
-    keybow.set_led(REC_KEY+3, *adjust_color_alpha(colors[REC_KEY],
-                                                  CONVERTION_ALPHA))
-    keybow.show()
-    wavfile.write('rec.wav', recording_rate, 
-                  r[:int(message_duration * recording_rate)])
+    while True: 
+        logging.info('Started job: "record_voice_note"')
+        await recording_message.wait()
+        logging.info('Recording pre-started')
+        start_time = time.time()
+        r = sd.rec(max_recording_time * recording_rate, 
+                   samplerate=recording_rate,
+                   channels=1, blocking=False)
+        logging.info('Recording started')
+        cond_f = (lambda t : (recording_message.is_set() and 
+                              (t < max_recording_time)))
+        await blinking_light(cond_f, REC_KEY, colors[REC_KEY])
+        message_duration = time.time() - start_time
+        logging.info('Recording ended')
+        keybow.set_led(REC_KEY+3, *adjust_color_alpha(colors[REC_KEY],
+                                                      CONVERTION_ALPHA))
+        keybow.show()
+        wavfile.write('rec.wav', recording_rate, 
+                      r[:int(message_duration * recording_rate)])
 
-    data, samplerate = sf.read('rec.wav')
-    sf.write('rec.ogg', data, samplerate, format='OGG', subtype='VORBIS')
-    recording_message.clear()
-    new_outgoing_message.set()
-    logging.info('Recording done')
-    keybow.set_led(REC_KEY+3, *adjust_color_alpha(colors[REC_KEY], 1))
-    keybow.show()
-    context.job_queue.run_once(record_voice_note, 0.1)
+        data, samplerate = sf.read('rec.wav')
+        sf.write('rec.ogg', data, samplerate, format='OGG', subtype='VORBIS')
+        recording_message.clear()
+        new_outgoing_message.set()
+        logging.info('Recording done')
+        keybow.set_led(REC_KEY+3, *adjust_color_alpha(colors[REC_KEY], 1))
+        keybow.show()
 
 
 async def incoming_light(context):
-    logging.info('Started job: "incoming_light"')
-    await new_incoming_message.wait()
-    logging.info('New message: blinking incoming light')
-    await blinking_light(lambda t : new_incoming_message.is_set(),
-                         PLAY_KEY, colors[PLAY_KEY], freq=0.25)
-    keybow.set_led(PLAY_KEY+3, *adjust_color_alpha(colors[PLAY_KEY], OFF_ALPHA))
-    keybow.show()
-    context.job_queue.run_once(incoming_light, 0.1)
+    while True:
+        logging.info('Started job: "incoming_light"')
+        await new_incoming_message.wait()
+        logging.info('New message: blinking incoming light')
+        await blinking_light(lambda t : new_incoming_message.is_set(),
+                             PLAY_KEY, colors[PLAY_KEY], freq=0.25)
+        keybow.set_led(PLAY_KEY+3, *adjust_color_alpha(colors[PLAY_KEY], OFF_ALPHA))
+        keybow.show()
 
 
 async def send_voice_note(context):
@@ -178,9 +179,6 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             data, samplerate = sf.read('voice.ogg')
             sf.write('voice.wav', data, samplerate)
-            #a = pydub.AudioSegment.from_file('voice.ogg')
-            #a = a.apply_gain(amp_correction)
-            #a.export('voice.wav', format='wav')
 
             new_incoming_message.set()
     else:
@@ -200,11 +198,16 @@ async def voice_echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def post_init(application):
-    td = datetime.timedelta(seconds=1)
-    application.job_queue.run_once(send_voice_note, td)
-    application.job_queue.run_once(incoming_light, td)
-    application.job_queue.run_once(record_voice_note, td)
-    application.job_queue.run_once(message_playback, td)
+    loop = asyncio.get_event_loop() 
+    #loop.create_task(send_voice_note())
+    loop.create_task(incoming_light(None))
+    loop.create_task(record_voice_note(None))
+    loop.create_task(message_playback(None))
+    #td = datetime.timedelta(hours=0, seconds=1)
+    application.job_queue.run_once(send_voice_note, 1)
+    #application.job_queue.run_once(incoming_light, td)
+    #application.job_queue.run_once(record_voice_note, td)
+    #application.job_queue.run_once(message_playback, td)
 
 
 def main():
@@ -222,8 +225,6 @@ def main():
     application.add_handler(echo_handler)
 
     logging.info(time.asctime())
-
-    td = datetime.timedelta(hours=0, seconds=1)
 
     keybow.set_led(REC_KEY+3, *colors[REC_KEY])
     keybow.set_led(PLAY_KEY+3, *adjust_color_alpha(colors[PLAY_KEY], OFF_ALPHA))
