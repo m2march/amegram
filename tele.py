@@ -4,6 +4,7 @@ import keybow
 import logging
 import time
 import datetime
+import subprocess
 from telegram import Update
 from telegram.ext import (ApplicationBuilder, ContextTypes, CommandHandler,
                           MessageHandler, PollHandler, filters)
@@ -79,7 +80,12 @@ def inc_volume():
     global current_volume_idx
     current_volume_idx = (current_volume_idx + 1) % len(volume_options)
     cur_vol = volume_options[current_volume_idx]
-    os.system(f'amixer -D pulse set Master {str(cur_vol)}%')
+    p = subprocess.Popen(['amixer', '-D', 'pulse', 'set', 'Master',
+                          str(cur_vol) + '%'], stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE
+                        )
+    logging.info(f'Changing volume to {str(cur_vol)}')
+    logging.info(p.communicate())
     alpha = (cur_vol / 100) * .7 + .3
     keybow.set_led(MID_KEY+3, 
                    *adjust_color_alpha(colors[MID_KEY], alpha))
